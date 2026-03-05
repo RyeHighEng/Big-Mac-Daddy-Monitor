@@ -1,3 +1,5 @@
+![Logo](mac-monitor.png)
+
 # Mac Daddy Monitor (Swift/macOS)
 
 Real-time macOS monitoring tool built with SwiftUI.
