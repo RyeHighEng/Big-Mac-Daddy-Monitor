@@ -1,6 +1,6 @@
 import Foundation
 
-struct ThreatFoxVerdict: Sendable {
+struct ThreatFoxVerdict: Sendable, Equatable {
     let malicious: Bool
     let confidence: Int
     let reason: String

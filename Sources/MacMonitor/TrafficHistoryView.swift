@@ -4,9 +4,29 @@ struct TrafficHistoryView: View {
     @EnvironmentObject private var viewModel: MonitorViewModel
     @State private var searchText = ""
     @State private var showIgnored = true
+    @State private var pageSize = 250
+    @State private var currentPage = 1
+    @State private var filteredHistoryCache: [HistoricalConnection] = []
+
+    private var totalPages: Int {
+        max(1, Int(ceil(Double(filteredHistoryCache.count) / Double(pageSize))))
+    }
+
+    private var pageRange: (start: Int, end: Int) {
+        guard !filteredHistoryCache.isEmpty else { return (0, 0) }
+        let start = ((currentPage - 1) * pageSize) + 1
+        let end = min(start + pageSize - 1, filteredHistoryCache.count)
+        return (start, end)
+    }
+
+    private var pagedHistory: [HistoricalConnection] {
+        let page = min(max(1, currentPage), totalPages)
+        let start = (page - 1) * pageSize
+        return Array(filteredHistoryCache.dropFirst(start).prefix(pageSize))
+    }
 
     private var filteredHistory: [HistoricalConnection] {
-        viewModel.historyConnections.filter { item in
+        viewModel.frozenHistoryConnections.filter { item in
             if !showIgnored && item.connection.status == .ignored { return false }
             if searchText.isEmpty { return true }
             let q = searchText.lowercased()
@@ -27,31 +47,71 @@ struct TrafficHistoryView: View {
                 HStack(spacing: 10) {
                     Text("Traffic History (Last 10 Minutes)")
                         .font(.system(size: 15, weight: .bold, design: .rounded))
+                    if let capturedAt = viewModel.frozenHistoryCapturedAt {
+                        Text("Snapshot: \(Formatters.timestampString(capturedAt))")
+                            .font(.system(size: 11, weight: .medium, design: .rounded))
+                            .foregroundStyle(AppTheme.selectionForeground.opacity(0.8))
+                    }
                     Spacer()
                     Toggle("Show Ignored", isOn: $showIgnored)
                         .toggleStyle(.checkbox)
                     TextField("Search process, IP, port, user, location", text: $searchText)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 320)
+                    Text("Rows:")
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .foregroundStyle(AppTheme.selectionForeground.opacity(0.8))
+                    Picker("", selection: $pageSize) {
+                        Text("100").tag(100)
+                        Text("250").tag(250)
+                        Text("500").tag(500)
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .frame(width: 190)
+                    Button("Prev") {
+                        currentPage = max(1, currentPage - 1)
+                    }
+                    .disabled(currentPage <= 1)
+                    Text("Page \(currentPage)/\(totalPages)")
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .foregroundStyle(AppTheme.selectionForeground.opacity(0.8))
+                    Button("Next") {
+                        currentPage = min(totalPages, currentPage + 1)
+                    }
+                    .disabled(currentPage >= totalPages)
                     Button("Clear") {
                         viewModel.clearHistory()
+                        recomputeFilteredCache(resetPage: true)
                     }
                 }
                 .padding(.horizontal)
                 .padding(.top, 10)
 
+                HStack {
+                    Text("Showing \(pageRange.start)-\(pageRange.end) of \(filteredHistoryCache.count)")
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundStyle(AppTheme.selectionForeground.opacity(0.75))
+                    Spacer()
+                    Button("Newest") {
+                        currentPage = 1
+                    }
+                    .disabled(currentPage == 1)
+                }
+                .padding(.horizontal)
+
                 ScrollView([.horizontal, .vertical]) {
-                    if filteredHistory.isEmpty {
+                    if filteredHistoryCache.isEmpty {
                         Text("No historical traffic rows captured yet.")
                             .font(.system(size: 13, weight: .medium, design: .rounded))
                             .foregroundStyle(AppTheme.selectionForeground.opacity(0.8))
                             .padding()
                             .frame(maxWidth: .infinity, alignment: .leading)
                     } else {
-                        VStack(alignment: .leading, spacing: 4) {
+                        LazyVStack(alignment: .leading, spacing: 4) {
                             HistoryHeaderRow()
                             Divider()
-                            ForEach(filteredHistory) { item in
+                            ForEach(pagedHistory) { item in
                                 HistoryDataRow(item: item)
                             }
                         }
@@ -62,6 +122,30 @@ struct TrafficHistoryView: View {
             }
         }
         .foregroundStyle(AppTheme.foreground)
+        .onAppear {
+            recomputeFilteredCache(resetPage: true)
+        }
+        .onChange(of: viewModel.frozenHistoryConnections) { _, _ in
+            recomputeFilteredCache(resetPage: false)
+        }
+        .onChange(of: searchText) { _, _ in
+            recomputeFilteredCache(resetPage: true)
+        }
+        .onChange(of: showIgnored) { _, _ in
+            recomputeFilteredCache(resetPage: true)
+        }
+        .onChange(of: pageSize) { _, _ in
+            recomputeFilteredCache(resetPage: true)
+        }
+    }
+
+    private func recomputeFilteredCache(resetPage: Bool) {
+        filteredHistoryCache = filteredHistory
+        if resetPage {
+            currentPage = 1
+            return
+        }
+        currentPage = min(max(1, currentPage), totalPages)
     }
 }
 

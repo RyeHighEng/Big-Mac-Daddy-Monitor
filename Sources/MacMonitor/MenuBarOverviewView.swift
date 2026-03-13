@@ -85,6 +85,7 @@ struct MenuBarOverviewView: View {
                     }
 
                     Button("Open 10m History") {
+                        viewModel.freezeHistorySnapshot()
                         openWindow(id: "history")
                         NSApplication.shared.activate(ignoringOtherApps: true)
                     }

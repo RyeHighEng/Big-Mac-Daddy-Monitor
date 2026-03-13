@@ -6,20 +6,21 @@ import AppKit
 struct ContentView: View {
     @EnvironmentObject private var viewModel: MonitorViewModel
     @State private var selectedConnectionID: String?
+    @State private var quickFilter: ConnectionQuickFilter = .all
 
     var body: some View {
         ZStack {
             AppTheme.background.ignoresSafeArea()
 
             VStack(spacing: 0) {
-                SummaryBar()
+                SummaryBar(quickFilter: $quickFilter)
                 Divider()
                 if !viewModel.diagnostics.isEmpty {
                     DiagnosticsBanner()
                     Divider()
                 }
                 TabView {
-                    ConnectionsTab(selectedConnectionID: $selectedConnectionID)
+                    ConnectionsTab(selectedConnectionID: $selectedConnectionID, quickFilter: $quickFilter)
                         .tabItem { Label("Traffic", systemImage: "network") }
                     PortsTab()
                         .tabItem { Label("Open Ports", systemImage: "cable.connector") }
@@ -76,12 +77,34 @@ private struct DiagnosticsBanner: View {
 
 private struct SummaryBar: View {
     @EnvironmentObject private var viewModel: MonitorViewModel
+    @Binding var quickFilter: ConnectionQuickFilter
 
     var body: some View {
         HStack(spacing: 16) {
-            SummaryChip(title: "Connections", value: "\(viewModel.connections.count)", tint: AppTheme.info)
-            SummaryChip(title: "Suspicious", value: "\(viewModel.suspiciousCount)", tint: AppTheme.danger)
-            SummaryChip(title: "Ignored", value: "\(viewModel.ignoredCount)", tint: AppTheme.surfaceMuted)
+            SummaryChip(
+                title: "Connections",
+                value: "\(viewModel.connections.count)",
+                tint: AppTheme.info,
+                isSelected: quickFilter == .all
+            ) {
+                quickFilter = .all
+            }
+            SummaryChip(
+                title: "Suspicious",
+                value: "\(viewModel.suspiciousCount)",
+                tint: AppTheme.danger,
+                isSelected: quickFilter == .suspicious
+            ) {
+                quickFilter = .suspicious
+            }
+            SummaryChip(
+                title: "Ignored",
+                value: "\(viewModel.ignoredCount)",
+                tint: AppTheme.surfaceMuted,
+                isSelected: quickFilter == .ignored
+            ) {
+                quickFilter = .ignored
+            }
             SummaryChip(title: "Open Ports", value: "\(viewModel.ports.count)", tint: AppTheme.warning)
             SummaryChip(title: "CPU", value: Formatters.percentString(viewModel.summary.cpuPercent), tint: AppTheme.success)
             SummaryChip(
@@ -125,8 +148,21 @@ private struct SummaryChip: View {
     let title: String
     let value: String
     let tint: Color
+    var isSelected: Bool = false
+    var action: (() -> Void)? = nil
 
     var body: some View {
+        Group {
+            if let action {
+                Button(action: action) { chipContent }
+                    .buttonStyle(.plain)
+            } else {
+                chipContent
+            }
+        }
+    }
+
+    private var chipContent: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
                 .font(.system(size: 11, weight: .semibold, design: .rounded))
@@ -141,6 +177,10 @@ private struct SummaryChip: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(tint.opacity(0.10))
         )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(isSelected ? tint.opacity(0.75) : .clear, lineWidth: 1.2)
+        )
     }
 }
 
@@ -148,13 +188,16 @@ private struct ConnectionsTab: View {
     @EnvironmentObject private var viewModel: MonitorViewModel
     @Environment(\.openWindow) private var openWindow
     @Binding var selectedConnectionID: String?
+    @Binding var quickFilter: ConnectionQuickFilter
 
     @State private var showIgnored = false
     @State private var searchText = ""
 
     private var filteredConnections: [NetworkConnection] {
         viewModel.connections.filter { connection in
-            if !showIgnored && connection.status == .ignored { return false }
+            if quickFilter == .suspicious && connection.status != .suspicious { return false }
+            if quickFilter == .ignored && connection.status != .ignored { return false }
+            if !showIgnored && quickFilter != .ignored && connection.status == .ignored { return false }
             if searchText.isEmpty { return true }
             let q = searchText.lowercased()
             return connection.process.lowercased().contains(q)
@@ -176,8 +219,15 @@ private struct ConnectionsTab: View {
                     .textFieldStyle(.roundedBorder)
                 Toggle("Show Ignored", isOn: $showIgnored)
                     .toggleStyle(.checkbox)
+                Picker("Filter", selection: $quickFilter) {
+                    Text("All").tag(ConnectionQuickFilter.all)
+                    Text("Suspicious").tag(ConnectionQuickFilter.suspicious)
+                    Text("Ignored").tag(ConnectionQuickFilter.ignored)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 260)
                 Spacer()
-                Text("Interval")
+                Text("UI Snapshot")
                     .foregroundStyle(AppTheme.selectionForeground.opacity(0.75))
                 Slider(value: $viewModel.refreshInterval, in: 1...10, step: 1)
                     .frame(width: 140)
@@ -185,6 +235,7 @@ private struct ConnectionsTab: View {
                     .foregroundStyle(AppTheme.selectionForeground.opacity(0.75))
                     .frame(width: 32)
                 Button("Open 10m History") {
+                    viewModel.freezeHistorySnapshot()
                     openWindow(id: "history")
                 }
             }
@@ -214,7 +265,7 @@ private struct ConnectionsTab: View {
                         .padding()
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
-                    VStack(alignment: .leading, spacing: 4) {
+                    LazyVStack(alignment: .leading, spacing: 4) {
                         ConnectionHeaderRow()
                         Divider()
                         ForEach(filteredConnections) { connection in
@@ -400,7 +451,7 @@ private struct PortsTab: View {
                     .padding()
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
-                VStack(alignment: .leading, spacing: 4) {
+                LazyVStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 8) {
                         header("Proto", width: 56)
                         header("Port", width: 80)
@@ -421,10 +472,10 @@ private struct PortsTab: View {
                         }
                         .padding(.vertical, 5)
                         .padding(.horizontal, 6)
-                        .background(AppTheme.warning.opacity(0.10))
+                        .background(AppTheme.surface.opacity(0.24))
                         .overlay(
                             RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                .stroke(AppTheme.warning.opacity(0.28), lineWidth: 1)
+                                .stroke(AppTheme.surfaceMuted.opacity(0.35), lineWidth: 1)
                         )
                     }
                 }
@@ -554,7 +605,7 @@ private struct ProcessesTab: View {
                         .padding()
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
-                    VStack(alignment: .leading, spacing: 4) {
+                    LazyVStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 8) {
                             header("PID", width: 70)
                             header("Process", width: 200)
@@ -574,10 +625,10 @@ private struct ProcessesTab: View {
                             }
                             .padding(.vertical, 4)
                             .padding(.horizontal, 6)
-                            .background(AppTheme.pink.opacity(0.10))
+                            .background(AppTheme.surface.opacity(0.24))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                    .stroke(AppTheme.pink.opacity(0.28), lineWidth: 1)
+                                    .stroke(AppTheme.surfaceMuted.opacity(0.35), lineWidth: 1)
                             )
                         }
                     }
@@ -618,6 +669,12 @@ private enum ProcessSortMode: String, CaseIterable {
     case memory = "Top Memory"
 }
 
+private enum ConnectionQuickFilter: String, CaseIterable {
+    case all = "All"
+    case suspicious = "Suspicious"
+    case ignored = "Ignored"
+}
+
 private struct InterfacesTab: View {
     @EnvironmentObject private var viewModel: MonitorViewModel
 
@@ -630,7 +687,7 @@ private struct InterfacesTab: View {
                     .padding()
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
-                VStack(alignment: .leading, spacing: 4) {
+                LazyVStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 8) {
                         header("Name", width: 120)
                         header("Family", width: 80)
