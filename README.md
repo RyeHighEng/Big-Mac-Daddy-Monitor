@@ -24,7 +24,7 @@ Real-time macOS monitoring tool built with SwiftUI.
 ## Run
 
 ```bash
-cd /Users/chrisjarvis/Documents/personal/mac-monitor
+cd /mac-monitor
 swift run
 ```
 
@@ -33,7 +33,7 @@ swift run
 To run without leaving a CLI window open, build a macOS `.app` bundle:
 
 ```bash
-cd /Users/chrisjarvis/Documents/personal/mac-monitor
+cd /mac-monitor
 ./scripts/build_app.sh
 open ./dist/Mac\ Daddy\ Monitor.app
 ```
